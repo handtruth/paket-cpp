@@ -1,5 +1,5 @@
 sources = files([
-  'sample_source.cpp'
+  'paket.cpp'
 ])
 
 src = include_directories('.')

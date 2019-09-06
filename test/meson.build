@@ -1,5 +1,9 @@
 test_names = [
-  'sample_test'
+  'errors_head',
+  'example',
+  'head',
+  'list',
+  'string_errors'
 ]
 
 test_files = []
