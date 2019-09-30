@@ -49,14 +49,14 @@ inline int write_varnum(byte_t bytes[], std::size_t length, numeric value) {
 }
 
 std::size_t size_varint(std::int32_t value) {
-	return static_cast<std::size_t>(write_varint(nullptr, std::numeric_limits<std::size_t>::max(), value));
+	return static_cast<std::size_t>(write_varint(value, nullptr, std::numeric_limits<std::size_t>::max()));
 }
 
-int read_varint(const byte_t bytes[], std::size_t length, std::int32_t & value) {
+int read_varint(std::int32_t & value, const byte_t bytes[], std::size_t length) {
 	return read_varnum<5>(bytes, length, value);
 }
 
-int write_varint(byte_t bytes[], std::size_t length, std::int32_t value) {
+int write_varint(std::int32_t value, byte_t bytes[], std::size_t length) {
 	return write_varnum(bytes, length, value);
 }
 
@@ -77,11 +77,11 @@ std::size_t fields::varint::size() const noexcept {
 }
 
 int fields::varint::read(const byte_t bytes[], std::size_t length) {
-	return read_varint(bytes, length, value);
+	return read_varint(value, bytes, length);
 }
 
 int fields::varint::write(byte_t bytes[], std::size_t length) const {
-	return write_varint(bytes, length, value);
+	return write_varint(value, bytes, length);
 }
 
 fields::varint::operator std::string() const {
@@ -110,7 +110,7 @@ std::size_t fields::string::size() const noexcept {
 
 int fields::string::read(const byte_t bytes[], std::size_t length) {
 	std::int32_t str_len;
-	int s = read_varint(bytes, length, str_len);
+	int s = read_varint(str_len, bytes, length);
 	if (s < 0)
 		return -1;
 	if (str_len < 0)
@@ -125,7 +125,7 @@ int fields::string::read(const byte_t bytes[], std::size_t length) {
 
 int fields::string::write(byte_t bytes[], std::size_t length) const {
 	std::int32_t str_len = static_cast<std::int32_t>(value.size());
-	int s = write_varint(bytes, length, str_len);
+	int s = write_varint(str_len, bytes, length);
 	if (s < 0)
 		return -1;
 	std::size_t reminder = length - s;
@@ -141,10 +141,10 @@ fields::string::operator std::string() const {
 }
 
 int head(const byte_t bytes[], std::size_t length, std::int32_t & size, std::int32_t & id) {
-	int s = read_varint(bytes, length, size);
+	int s = read_varint(size, bytes, length);
 	if (s < 0)
 		return -1;
-	int k = read_varint(bytes + s, length - s, id);
+	int k = read_varint(id, bytes + s, length - s);
 	if (k < 0)
 		return -1;
 	else

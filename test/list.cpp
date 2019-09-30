@@ -1,3 +1,4 @@
+#define PAKET_LIB_EXT
 #include <paket.hpp>
 
 #include "test.hpp"
@@ -6,7 +7,7 @@ using namespace handtruth::pakets;
 
 struct lists_paket : paket<223, fields::varint, fields::list<std::string>> {
     std::int32_t & varik = field<0>();
-    list<1> listik = field<1>();
+    list_wrap<1> listik = field<1>();
 };
 
 test {

@@ -8,16 +8,44 @@
 #include <vector>
 #include <initializer_list>
 #include <limits>
+#include <array>
 
 namespace handtruth {
 
 namespace pakets {
 
+/**
+ * \brief Smallest addresable unit.
+ * 
+ * This type is used in raw data arrays. This arrays will be decoded to
+ * paket or encoded to paket.
+ */
 typedef std::uint8_t byte_t;
 
+/**
+ * Get size of encoded varint.
+ * 
+ * \param value varint
+ * \return size in bytes of encoded varint
+ */
 std::size_t size_varint(std::int32_t value);
-int read_varint(const byte_t bytes[], std::size_t length, std::int32_t & value);
-int write_varint(byte_t bytes[], std::size_t length, std::int32_t value);
+
+/**
+ * Tries to read varint from byte array.
+ * 
+ */
+int read_varint(std::int32_t & value, const byte_t bytes[], std::size_t length);
+template <std::size_t N>
+inline int read_varint(std::int32_t & value, const std::array<byte_t, N> & bytes, std::size_t length = N) {
+	return read_varint(value, bytes.data(), length);
+}
+
+int write_varint(std::int32_t value, byte_t bytes[], std::size_t length);
+
+template <std::size_t N>
+inline int write_varint(std::int32_t value, std::array<byte_t, N> & bytes, std::size_t length = N) {
+	return write_varint(value, bytes, length);
+}
 
 std::size_t size_varlong(std::int64_t value);
 int read_varlong(const byte_t bytes[], std::size_t length, std::int64_t & value);
@@ -138,7 +166,7 @@ namespace fields {
 		}
 		int read(const byte_t bytes[], std::size_t length) {
 			std::int32_t sz;
-			int offset = read_varint(bytes, length, sz);
+			int offset = read_varint(sz, bytes, length);
 			if (offset == -1)
 				return -1;
 			if (sz < 0)
@@ -153,7 +181,7 @@ namespace fields {
 			return offset;
 		}
 		int write(byte_t bytes[], std::size_t length) const {
-			int offset = write_varint(bytes, length, static_cast<std::int32_t>(this->value.size()));
+			int offset = write_varint(static_cast<std::int32_t>(this->value.size()), bytes, length);
 			if (offset == -1)
 				return -1;
 			for (const T & f : this->value) {
@@ -262,23 +290,23 @@ struct list_wrapper_iterator {
 	}
 };
 
-template <typename Field>
+template <typename List>
 class list_wrapper {
-	std::vector<Field> & ref;
+	List & ref;
 public:
-	typedef typename std::vector<Field>::size_type size_type;
-	typedef typename Field::value_type value_type;
-	typedef Field field_type;
+	typedef typename List::value_type field_type;
+	typedef typename List::size_type size_type;
+	typedef typename field_type::value_type value_type;
 	typedef value_type & reference;
 	typedef const value_type & const_reference;
 	typedef value_type * pointer;
 	typedef const value_type * const_pointer;
-	typedef list_wrapper_iterator<typename std::vector<Field>::iterator> iterator;
-	typedef list_wrapper_iterator<typename std::vector<Field>::const_iterator> const_iterator;
-	typedef list_wrapper_iterator<typename std::vector<Field>::reverse_iterator> reverse_iterator;
-	typedef list_wrapper_iterator<typename std::vector<Field>::const_reverse_iterator> const_reverse_iterator;
+	typedef list_wrapper_iterator<typename std::vector<field_type>::iterator> iterator;
+	typedef list_wrapper_iterator<typename std::vector<field_type>::const_iterator> const_iterator;
+	typedef list_wrapper_iterator<typename std::vector<field_type>::reverse_iterator> reverse_iterator;
+	typedef list_wrapper_iterator<typename std::vector<field_type>::const_reverse_iterator> const_reverse_iterator;
 
-	list_wrapper(std::vector<Field> & vector) : ref(vector) {};
+	constexpr list_wrapper(List & vector) : ref(vector) {};
 
 	list_wrapper & operator=(const std::vector<value_type> & other) {
 		ref.clear();
@@ -335,7 +363,7 @@ public:
 		return ref.size();
 	}
 	constexpr size_type max_size() const noexcept {
-		return std::numeric_limits<int>::max() / sizeof(Field);
+		return std::numeric_limits<int>::max() / sizeof(field_type);
 	}
 	void reserve(size_type new_cap) {
 		ref.reserve(new_cap);
@@ -412,7 +440,7 @@ public:
 
 int head(const byte_t bytes[], std::size_t length, std::int32_t & size, std::int32_t & id);
 
-template <int paket_id, typename ...fields_t>
+template <std::int32_t paket_id, typename ...fields_t>
 class paket : public std::tuple<fields_t...> {
 private:
 	template <typename first, typename ...other>
@@ -444,11 +472,22 @@ public:
 	constexpr const value_type<i> & field() const noexcept {
 		return std::get<i>(*this).value;
 	}
-	
-	template <std::size_t i>
-	using list = list_wrapper<typename value_type<i>::value_type>;
 
-	constexpr int id() const noexcept {
+	template <std::size_t i>
+	using list_wrap = list_wrapper<value_type<i>>;
+	template <std::size_t i>
+	using list_const_wrap = list_wrapper<const value_type<i>>;
+
+	template <int i>
+	constexpr field_type<i> & wrapper() noexcept {
+		return std::get<i>(*this);
+	}
+	template <int i>
+	constexpr const field_type<i> & wrapper() const noexcept {
+		return std::get<i>(*this);
+	}
+
+	constexpr std::int32_t id() const noexcept {
 		return paket_id;
 	}
 private:
@@ -482,11 +521,11 @@ public:
 	int write(byte_t bytes[], std::size_t length) const {
 		// HEAD
 		// size of size
-		int k = write_varint(bytes, length, size_varint(paket_id) + size());
+		int k = write_varint(size_varint(paket_id) + size(), bytes, length);
 		if (k < 0)
 			return -1;
 		// size of id
-		int s = write_varint(bytes + k, length - k, paket_id);
+		int s = write_varint(paket_id, bytes + k, length - k);
 		if (s < 0)
 			return -1;
 		s += k;
@@ -500,16 +539,20 @@ public:
 		else
 			return comp_size + s;
 	}
+	template <std::size_t N>
+	inline int write(std::array<byte_t, N> & bytes, std::size_t length = N) const {
+		return write(bytes.data(), length);
+	}
 	int read(const byte_t bytes[], std::size_t length) {
 		std::int32_t size;
 		std::int32_t id;
 		// HEAD
-		int k = read_varint(bytes, length, size);
+		int k = read_varint(size, bytes, length);
 		if (k < 0)
 			return -1;
 		if ((std::size_t)(size + k) > length)
 			return -1;
-		int s = read_varint(bytes + k, length - k, id);
+		int s = read_varint(id, bytes + k, length - k);
 		if (s < 0)
 			return -1;
 		if (id != paket_id)
@@ -526,6 +569,10 @@ public:
 			throw paket_error("wrong paket size (" + std::to_string(size) + " expected, got " + std::to_string(comp_size + s) + ")");
 		else
 			return comp_size + l;
+	}
+	template <std::size_t N>
+	inline int read(const std::array<byte_t, N> & bytes, std::size_t length = N) {
+		return read(bytes.data(), length);
 	}
 private:
 	template <typename first, typename ...other>
@@ -563,5 +610,20 @@ namespace std {
 	}
 
 } // namespace std
+
+#ifdef PAKET_LIB_EXT
+
+#	define fname(name, n) \
+		constexpr value_type<n> & name() noexcept { return field<n>(); }\
+		constexpr const value_type<n> & name() const noexcept { return field<n>(); }
+#	define lname(name, n) \
+		constexpr list_wrap<n> name() noexcept { return field<n>(); }\
+		constexpr const list_const_wrap<n> name() const noexcept { return field<n>(); }
+#	define ename(name, n, type) \
+		fname(name##_numeric, n) \
+		constexpr type name() const noexcept { return type(name##_numeric()); } \
+		constexpr void name(type c) noexcept { name##_numeric() = std::int32_t(c); }
+
+#endif // PAKET_LIB_EXT
 
 #endif // _PAKET_HEAD
