@@ -1,4 +1,4 @@
-project('paket-cpp', 'cpp',
+project('paket-cpp', 'cpp', license : 'mit',
   version : run_command('git', 'describe', '--abbrev=0', '--tags').stdout().strip(),
   default_options : ['warning_level=3',
                      'cpp_std=c++17'])

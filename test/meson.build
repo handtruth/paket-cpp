@@ -3,6 +3,7 @@ test_names = [
   'example',
   'head',
   'list',
+  'small_paket',
   'string_errors'
 ]
 

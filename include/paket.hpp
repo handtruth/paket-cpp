@@ -121,7 +121,7 @@ namespace fields {
 			return static_size();
 		}
 		int write(byte_t bytes[], std::size_t length) const {
-			if (length <= static_size())
+			if (length < static_size())
 				return -1;
 			*(reinterpret_cast<typename field<T>::value_type *>(bytes)) = field<T>::value;
 			return static_size();
