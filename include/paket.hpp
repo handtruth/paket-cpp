@@ -10,6 +10,24 @@
 #include <limits>
 #include <array>
 
+#if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || \
+    defined(__BIG_ENDIAN__) || \
+    defined(__ARMEB__) || \
+    defined(__THUMBEB__) || \
+    defined(__AARCH64EB__) || \
+    defined(_MIBSEB) || defined(__MIBSEB) || defined(__MIBSEB__)
+#	define PAKET_BIG_ENDIAN
+#elif defined(__BYTE_ORDER) && __BYTE_ORDER == __LITTLE_ENDIAN || \
+    defined(__LITTLE_ENDIAN__) || \
+    defined(__ARMEL__) || \
+    defined(__THUMBEL__) || \
+    defined(__AARCH64EL__) || \
+    defined(_MIPSEL) || defined(__MIPSEL) || defined(__MIPSEL__) || \
+	defined(__MINGW32__)
+#else
+//#	error "unknown architecture"
+#endif
+
 namespace handtruth {
 
 namespace pakets {
@@ -64,6 +82,7 @@ namespace fields {
 		T value;
 		field() = default;
 		constexpr field(const T & other) : value(other) {}
+		constexpr field(T && other) : value(std::move(other)) {}
 		T & operator*() noexcept {
 			return value;
 		}
@@ -108,22 +127,40 @@ namespace fields {
 		static constexpr std::size_t static_size() noexcept {
 			return sizeof(typename field<T>::value_type);
 		}
-	public:
 		static_size_field() = default;
 		constexpr static_size_field(const typename field<T>::value_type & init) : field<T>(init) {}
 		constexpr std::size_t size() const noexcept {
 			return static_size();
 		}
+	private:
+		static inline constexpr T phtons(T number) {
+#			ifdef PAKET_BIG_ENDIAN
+				return number;
+#			else
+				constexpr std::size_t n = static_size();
+				union {
+					T number;
+					byte_t data[n];
+				} tmp { number };
+				for (std::size_t i = 0; i < n/2; ++i) {
+					byte_t z = tmp.data[i];
+					tmp.data[i] = tmp.data[n - i - 1];
+					tmp.data[n - i - 1] = z;
+				}
+				return tmp.number;
+#			endif
+		}
+	public:
 		int read(const byte_t bytes[], std::size_t length) {
 			if (length < static_size())
 				return -1;
-			field<T>::value = *(reinterpret_cast<const typename field<T>::value_type *>(bytes));
+			field<T>::value = phtons(*(reinterpret_cast<const typename field<T>::value_type *>(bytes)));
 			return static_size();
 		}
 		int write(byte_t bytes[], std::size_t length) const {
 			if (length < static_size())
 				return -1;
-			*(reinterpret_cast<typename field<T>::value_type *>(bytes)) = field<T>::value;
+			*(reinterpret_cast<typename field<T>::value_type *>(bytes)) = phtons(field<T>::value);
 			return static_size();
 		}
 		operator std::string() const {
@@ -614,15 +651,15 @@ namespace std {
 #ifdef PAKET_LIB_EXT
 
 #	define fname(name, n) \
-		constexpr value_type<n> & name() noexcept { return field<n>(); }\
-		constexpr const value_type<n> & name() const noexcept { return field<n>(); }
+		constexpr auto & name() noexcept { return this->template field<n>(); }\
+		constexpr const auto & name() const noexcept { return this->template field<n>(); }
 #	define lname(name, n) \
-		constexpr list_wrap<n> name() noexcept { return field<n>(); }\
-		constexpr const list_const_wrap<n> name() const noexcept { return field<n>(); }
+		constexpr list_wrap<n> name() noexcept { return this->field<n>(); }\
+		constexpr const list_const_wrap<n> name() const noexcept { return this->field<n>(); }
 #	define ename(name, n, type) \
-		fname(name##_numeric, n) \
-		constexpr type name() const noexcept { return type(name##_numeric()); } \
-		constexpr void name(type c) noexcept { name##_numeric() = std::int32_t(c); }
+		fname(name##_ordinal, n) \
+		constexpr type name() const noexcept { return type(name##_ordinal()); } \
+		constexpr void name(type c) noexcept { name##_ordinal() = std::int32_t(c); }
 
 #endif // PAKET_LIB_EXT
 
