@@ -8,6 +8,8 @@ test {
 	struct : paket<1, fields::int64> {
 		fname(lf, 0);
 	} paket1, paket2;
+	static_assert(sizeof(paket1) == 8u);
+	assert_equals(sizeof(paket1), 8u);
 	paket1.lf() = 245735678;
 	const int sz = 10;
 	std::array<byte_t, sz> data;

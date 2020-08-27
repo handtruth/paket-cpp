@@ -9,6 +9,7 @@
 #include <initializer_list>
 #include <limits>
 #include <array>
+#include <type_traits>
 
 #if defined(__BYTE_ORDER) && __BYTE_ORDER == __BIG_ENDIAN || \
     defined(__BIG_ENDIAN__) || \
@@ -40,6 +41,136 @@ namespace pakets {
  */
 typedef std::uint8_t byte_t;
 
+class paket_error : public std::runtime_error {
+public:
+	paket_error(const std::string & message) : std::runtime_error(message) {}
+};
+
+template <typename numeric>
+constexpr std::size_t max_varnum_size() {
+	static_assert(std::is_integral_v<numeric>);
+	return sizeof(numeric) * 8 / 7 + (sizeof(numeric) * 8 % 7 > 0);
+}
+
+template <typename numeric>
+constexpr std::enable_if_t<std::is_unsigned_v<numeric>, std::size_t> max_zint_size() {
+	return max_varnum_size<numeric>();
+}
+
+template <typename numeric>
+constexpr std::enable_if_t<std::is_signed_v<numeric>, std::size_t> max_zint_size() {
+	return (sizeof(numeric) * 8 + 1) / 7 + ((sizeof(numeric) * 8 + 1) % 7 > 0);
+}
+
+template <typename numeric>
+int read_varnum(numeric & value, const byte_t bytes[], std::size_t length) {
+	std::size_t numRead = 0;
+    byte_t read;
+	value = 0;
+    do {
+		if (numRead == length)
+			return -1;
+        read = bytes[numRead];
+        numeric tmp = (read & 0b01111111);
+
+		value |= (tmp << (7 * numRead));
+
+        numRead++;
+        if (numRead > max_varnum_size<numeric>()) {
+            throw paket_error("varint is too big");
+        }
+    } while ((read & 0b10000000) != 0);
+    return numRead;
+}
+
+template <typename numeric>
+int write_varnum(numeric value, byte_t bytes[], std::size_t length) {
+	std::size_t numWrite = 0;
+	std::make_unsigned_t<numeric> uval = value;
+	do {
+		if (numWrite == length)
+			return -1;
+		byte_t temp = static_cast<byte_t>(uval & 0b01111111);
+		uval >>= 7;
+		if (uval != 0) {
+			temp |= 0b10000000;
+		}
+		if (bytes)
+			bytes[numWrite] = temp;
+		++numWrite;
+	} while (uval != 0);
+	return numWrite;
+}
+
+template <typename numeric>
+std::enable_if_t<std::is_unsigned_v<numeric>, int> read_zint(numeric & value, const byte_t bytes[], std::size_t length) {
+	return read_varnum(value, bytes, length);
+}
+
+template <typename numeric>
+std::enable_if_t<std::is_signed_v<numeric>, int> read_zint(numeric & value, const byte_t bytes[], std::size_t length) {
+	if (length == 0)
+		return -1;
+	std::size_t numRead = 1;
+    byte_t read = bytes[0];
+	bool sign = read & 1;
+	value = (read >> 1) & 0b00111111;
+    while ((read & 0b10000000) != 0) {
+		if (numRead == length)
+			return -1;
+        read = bytes[numRead];
+        numeric tmp = (read & 0b01111111);
+
+		value |= (tmp << (7 * (numRead - 1) + 6));
+
+        numRead++;
+        if (numRead > max_zint_size<numeric>()) {
+            throw paket_error("szint is too big");
+        }
+    }
+	if (sign)
+		value = -value;
+    return numRead;
+}
+
+template <typename numeric>
+std::enable_if_t<std::is_unsigned_v<numeric>, int> write_zint(numeric value, byte_t bytes[], std::size_t length) {
+	return write_varnum(value, bytes, length);
+}
+
+template <typename numeric>
+std::enable_if_t<std::is_signed_v<numeric>, int> write_zint(numeric value, byte_t bytes[], std::size_t length) {
+	if (length == 0)
+		return -1;
+	std::size_t numWrite = 1;
+	byte_t sign = value < 0;
+	std::make_unsigned_t<numeric> uval = sign ? -value : value;
+	byte_t temp = (static_cast<byte_t>(uval & 0b00111111) << 1) | sign;
+	uval >>= 6;
+	if (uval != 0)
+		temp |= 0b10000000;
+	if (bytes)
+		bytes[0] = temp;
+	while (uval != 0) {
+		if (numWrite == length)
+			return -1;
+		temp = static_cast<byte_t>(uval & 0b01111111);
+		uval >>= 7;
+		if (uval != 0) {
+			temp |= 0b10000000;
+		}
+		if (bytes)
+			bytes[numWrite] = temp;
+		++numWrite;
+	}
+	return numWrite;
+}
+
+template <typename numeric>
+std::size_t size_zint(numeric value) {
+	return static_cast<std::size_t>(write_zint(value, nullptr, std::numeric_limits<std::size_t>::max()));
+}
+
 /**
  * Get size of encoded varint.
  * 
@@ -68,11 +199,6 @@ inline int write_varint(std::int32_t value, std::array<byte_t, N> & bytes, std::
 std::size_t size_varlong(std::int64_t value);
 int read_varlong(const byte_t bytes[], std::size_t length, std::int64_t & value);
 int write_varlong(byte_t bytes[], std::size_t length, std::int64_t value);
-
-class paket_error : public std::runtime_error {
-public:
-	paket_error(const std::string & message) : std::runtime_error(message) {}
-};
 
 namespace fields {
 
@@ -111,6 +237,25 @@ namespace fields {
 		int read(const byte_t bytes[], std::size_t length);
 		int write(byte_t bytes[], std::size_t length) const;
 		operator std::string() const;
+	};
+
+	template <typename T>
+	struct zint : public field<T> {
+		static_assert(std::is_integral<T>::value);
+		zint() = default;
+		constexpr zint(T init) : field<T>(init) {}
+		std::size_t size() const noexcept {
+			return size_zint(this->value);
+		}
+		int read(const byte_t bytes[], std::size_t length) {
+			return read_zint(this->value, bytes, length);
+		}
+		int write(byte_t bytes[], std::size_t length) const {
+			return write_zint(this->value, bytes, length);
+		}
+		operator std::string() const {
+			return std::to_string(this->value);
+		}
 	};
 
 	struct string : public field<std::string> {
@@ -189,6 +334,17 @@ namespace fields {
 	struct int64 : public static_size_field<std::int64_t> {
 		int64() = default;
 		constexpr int64(const value_type & init) : static_size_field(init) {}
+	};
+
+	struct rest : public field<std::vector<byte_t>> {
+		rest() = default;
+		rest(const value_type & init) : field(init) {}
+		std::size_t size() const noexcept {
+			return value.size();
+		}
+		int read(const byte_t bytes[], std::size_t length);
+		int write(byte_t bytes[], std::size_t length) const;
+		operator std::string() const;
 	};
 
 	template <typename T>

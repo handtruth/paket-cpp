@@ -4,7 +4,8 @@ test_names = [
   'head',
   'list',
   'small_paket',
-  'string_errors'
+  'string_errors',
+  'paket_zint'
 ]
 
 test_files = []

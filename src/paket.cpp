@@ -2,62 +2,21 @@
 
 #include <exception>
 #include <cstring>
-#include <type_traits>
 
 namespace handtruth {
 
 namespace pakets {
-
-template <std::size_t max, typename numeric>
-inline int read_varnum(const byte_t bytes[], std::size_t length, numeric & value) {
-	std::size_t numRead = 0;
-    byte_t read;
-	value = 0;
-    do {
-		if (numRead == length)
-			return -1;
-        read = bytes[numRead];
-        numeric tmp = (read & 0b01111111);
-
-		value |= (tmp << (7 * numRead));
-
-        numRead++;
-        if (numRead > max) {
-            throw paket_error("varint is too big");
-        }
-    } while ((read & 0b10000000) != 0);
-    return numRead;
-}
-
-template <typename numeric>
-inline int write_varnum(byte_t bytes[], std::size_t length, numeric value) {
-	std::size_t numWrite = 0;
-	std::make_unsigned_t<numeric> uval = value;
-	do {
-		if (numWrite == length)
-			return -1;
-		byte_t temp = static_cast<byte_t>(uval & 0b01111111);
-		uval >>= 7;
-		if (uval != 0) {
-			temp |= 0b10000000;
-		}
-		if (bytes)
-			bytes[numWrite] = temp;
-		++numWrite;
-	} while (uval != 0);
-	return numWrite;
-}
 
 std::size_t size_varint(std::int32_t value) {
 	return static_cast<std::size_t>(write_varint(value, nullptr, std::numeric_limits<std::size_t>::max()));
 }
 
 int read_varint(std::int32_t & value, const byte_t bytes[], std::size_t length) {
-	return read_varnum<5>(bytes, length, value);
+	return read_varnum(value, bytes, length);
 }
 
 int write_varint(std::int32_t value, byte_t bytes[], std::size_t length) {
-	return write_varnum(bytes, length, value);
+	return write_varnum(value, bytes, length);
 }
 
 std::size_t size_varlong(std::int64_t value) {
@@ -65,11 +24,11 @@ std::size_t size_varlong(std::int64_t value) {
 }
 
 int read_varlong(const byte_t bytes[], std::size_t length, std::int64_t & value) {
-	return read_varnum<10>(bytes, length, value);
+	return read_varnum(value, bytes, length);
 }
 
 int write_varlong(byte_t bytes[], std::size_t length, std::int64_t value) {
-	return write_varnum(bytes, length, value);
+	return write_varnum(value, bytes, length);
 }
 
 std::size_t fields::varint::size() const noexcept {
@@ -138,6 +97,24 @@ int fields::string::write(byte_t bytes[], std::size_t length) const {
 
 fields::string::operator std::string() const {
 	return '"' + value + '"';
+}
+
+int fields::rest::read(const byte_t bytes[], std::size_t length) {
+	value.resize(length);
+	std::memcpy(value.data(), bytes, length);
+	return static_cast<int>(length);
+}
+
+int fields::rest::write(byte_t bytes[], std::size_t length) const {
+	auto size = value.size();
+	if (size > length)
+		return -1;
+	std::memcpy(bytes, value.data(), size);
+	return static_cast<int>(size);
+}
+
+fields::rest::operator std::string() const {
+	return "<bytes>";
 }
 
 int head(const byte_t bytes[], std::size_t length, std::int32_t & size, std::int32_t & id) {
